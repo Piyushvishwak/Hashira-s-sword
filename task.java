@@ -1,36 +1,39 @@
-import org.json.JSONArray;
 import org.json.JSONObject;
 import java.math.BigInteger;
 import java.util.*;
-import java.util.regex.*;
 
 public class ShamirSecretRecovery {
 
     public static void main(String[] args) {
-        Scanner sc = new Scanner(System.in);
-        StringBuilder sb = new StringBuilder();
-        while (sc.hasNextLine()) {
-            sb.append(sc.nextLine());
-        }
-        sc.close();
+        String testCase1 = "{\"keys\":{\"n\":4,\"k\":3},\"1\":{\"base\":\"10\",\"value\":\"4\"},\"2\":{\"base\":\"2\",\"value\":\"111\"},\"3\":{\"base\":\"10\",\"value\":\"12\"},\"6\":{\"base\":\"4\",\"value\":\"213\"}}";
+        String testCase2 = "{\"keys\":{\"n\":10,\"k\":7},\"1\":{\"base\":\"6\",\"value\":\"13444211440455345511\"},\"2\":{\"base\":\"15\",\"value\":\"aed7015a346d63\"},\"3\":{\"base\":\"15\",\"value\":\"6aeeb69631c227c\"},\"4\":{\"base\":\"16\",\"value\":\"e1b5e05623d881f\"},\"5\":{\"base\":\"8\",\"value\":\"316034514573652620673\"},\"6\":{\"base\":\"3\",\"value\":\"2122212201122002221120200210011020220200\"},\"7\":{\"base\":\"3\",\"value\":\"20120221122211000100210021102001201112121\"},\"8\":{\"base\":\"6\",\"value\":\"20220554335330240002224253\"},\"9\":{\"base\":\"12\",\"value\":\"45153788322a1255483\"},\"10\":{\"base\":\"7\",\"value\":\"1101613130313526312514143\"}}";
 
-        JSONObject obj = new JSONObject(sb.toString());
-        int n = obj.getInt("n");
-        int k = obj.getInt("k");
-        JSONArray keys = obj.getJSONArray("keys");
+        BigInteger secret1 = recoverSecret(testCase1);
+        BigInteger secret2 = recoverSecret(testCase2);
+
+        System.out.println("Secret for test case 1: " + secret1);
+        System.out.println("Secret for test case 2: " + secret2);
+    }
+
+    private static BigInteger recoverSecret(String jsonInput) {
+        JSONObject obj = new JSONObject(jsonInput);
+        JSONObject keysObj = obj.getJSONObject("keys");
+        int n = keysObj.getInt("n");
+        int k = keysObj.getInt("k");
 
         List<BigInteger> xList = new ArrayList<>();
         List<BigInteger> yList = new ArrayList<>();
         Set<BigInteger> seenX = new HashSet<>();
 
-        for (int i = 0; i < keys.length(); i++) {
-            String keyStr = keys.getString(i);
-            List<BigInteger> nums = extractBigIntegers(keyStr);
-            if (nums.size() < 2) {
-                continue;
-            }
-            BigInteger x = nums.get(0);
-            BigInteger y = nums.get(1);
+        for (String key : obj.keySet()) {
+            if (key.equals("keys")) continue;
+            JSONObject shareObj = obj.getJSONObject(key);
+            String baseStr = shareObj.getString("base");
+            String valueStr = shareObj.getString("value");
+            int base = Integer.parseInt(baseStr);
+            BigInteger x = new BigInteger(key);
+            BigInteger y = new BigInteger(valueStr, base);
+
             if (seenX.contains(x)) {
                 continue;
             }
@@ -41,7 +44,7 @@ public class ShamirSecretRecovery {
 
         if (xList.size() < k) {
             System.out.println("Insufficient valid shares");
-            return;
+            return BigInteger.valueOf(-1);
         }
 
         List<List<Integer>> combinations = generateCombinations(xList.size(), k);
@@ -55,66 +58,65 @@ public class ShamirSecretRecovery {
                 ys.add(yList.get(index));
             }
 
-            try {
-                BigInteger numTotal = BigInteger.ZERO;
-                BigInteger denTotal = BigInteger.ONE;
+            BigInteger totalNum = BigInteger.ZERO;
+            BigInteger totalDen = BigInteger.ONE;
+            boolean validCombination = true;
 
-                for (int i = 0; i < xs.size(); i++) {
-                    BigInteger numerator = BigInteger.ONE;
-                    BigInteger denominator = BigInteger.ONE;
-                    for (int j = 0; j < xs.size(); j++) {
-                        if (i == j) continue;
-                        numerator = numerator.multiply(xs.get(j).negate());
-                        denominator = denominator.multiply(xs.get(i).subtract(xs.get(j)));
-                    }
-                    if (denominator.equals(BigInteger.ZERO)) {
-                        throw new ArithmeticException("Division by zero");
-                    }
-                    BigInteger termNum = ys.get(i).multiply(numerator);
-                    BigInteger newNum = numTotal.multiply(denominator).add(termNum.multiply(denTotal));
-                    BigInteger newDen = denTotal.multiply(denominator);
+            for (int i = 0; i < xs.size(); i++) {
+                BigInteger num_i = ys.get(i);
+                BigInteger den_i = BigInteger.ONE;
 
-                    BigInteger gcd = newNum.gcd(newDen);
-                    if (!gcd.equals(BigInteger.ZERO)) {
-                        newNum = newNum.divide(gcd);
-                        newDen = newDen.divide(gcd);
-                    }
-
-                    if (newDen.signum() < 0) {
-                        newDen = newDen.negate();
-                        newNum = newNum.negate();
-                    }
-
-                    numTotal = newNum;
-                    denTotal = newDen;
+                for (int j = 0; j < xs.size(); j++) {
+                    if (i == j) continue;
+                    num_i = num_i.multiply(xs.get(j).negate());
+                    den_i = den_i.multiply(xs.get(i).subtract(xs.get(j)));
                 }
 
-                if (denTotal.equals(BigInteger.ZERO)) {
-                    continue;
+                if (den_i.equals(BigInteger.ZERO)) {
+                    validCombination = false;
+                    break;
                 }
 
-                BigInteger gcdFinal = numTotal.gcd(denTotal);
-                if (!gcdFinal.equals(BigInteger.ZERO)) {
-                    numTotal = numTotal.divide(gcdFinal);
-                    denTotal = denTotal.divide(gcdFinal);
+                BigInteger newNum = totalNum.multiply(den_i).add(num_i.multiply(totalDen));
+                BigInteger newDen = totalDen.multiply(den_i);
+
+                if (newDen.equals(BigInteger.ZERO)) {
+                    validCombination = false;
+                    break;
                 }
 
-                if (denTotal.signum() < 0) {
-                    denTotal = denTotal.negate();
-                    numTotal = numTotal.negate();
+                BigInteger gcd = newNum.gcd(newDen);
+                if (!gcd.equals(BigInteger.ZERO)) {
+                    newNum = newNum.divide(gcd);
+                    newDen = newDen.divide(gcd);
                 }
 
-                if (denTotal.equals(BigInteger.ONE)) {
-                    candidateSecrets.add(numTotal);
+                if (newDen.compareTo(BigInteger.ZERO) < 0) {
+                    newNum = newNum.negate();
+                    newDen = newDen.negate();
                 }
-            } catch (Exception e) {
+
+                totalNum = newNum;
+                totalDen = newDen;
+            }
+
+            if (!validCombination) {
                 continue;
+            }
+
+            if (totalDen.compareTo(BigInteger.ZERO) < 0) {
+                totalNum = totalNum.negate();
+                totalDen = totalDen.negate();
+            }
+
+            if (totalDen.equals(BigInteger.ONE)) {
+                candidateSecrets.add(totalNum);
             }
         }
 
         if (candidateSecrets.isEmpty()) {
             System.out.println("No valid secret found");
-            return;
+            return BigInteger.valueOf(-1);
         }
 
         Map<BigInteger, Integer> frequencyMap = new HashMap<>();
@@ -136,26 +138,11 @@ public class ShamirSecretRecovery {
 
         if (bestCandidates.isEmpty()) {
             System.out.println("No valid secret found");
+            return BigInteger.valueOf(-1);
         } else {
             Collections.sort(bestCandidates);
-            System.out.println(bestCandidates.get(0));
+            return bestCandidates.get(0);
         }
-    }
-
-    private static List<BigInteger> extractBigIntegers(String s) {
-        List<BigInteger> list = new ArrayList<>();
-        Pattern pattern = Pattern.compile("-?\\d+");
-        Matcher matcher = pattern.matcher(s);
-        while (matcher.find()) {
-            String token = matcher.group();
-            try {
-                BigInteger num = new BigInteger(token);
-                list.add(num);
-            } catch (NumberFormatException e) {
-                continue;
-            }
-        }
-        return list;
     }
 
     private static List<List<Integer>> generateCombinations(int n, int k) {
